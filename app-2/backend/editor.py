@@ -1,4 +1,4 @@
-"""
+""
 editor.py
 
 Logica di montaggio video (ffmpeg), adattata dal prototipo monta_video.py
@@ -110,6 +110,21 @@ def get_duration(path: Path) -> float:
     return float(r.stdout.strip())
 
 
+def hard_join(a: Path, b: Path, out_path: Path):
+    """Unisce due file gia' incodificati con un taglio secco (nessuna
+    transizione), usando il concat demuxer. Usato quando l'IA decide che
+    tra un blocco e l'altro non c'e' una vera svolta narrativa."""
+    list_file = out_path.parent / f"{out_path.stem}_hardjoin_list.txt"
+    with open(list_file, "w") as f:
+        f.write(f"file '{a.resolve()}'\n")
+        f.write(f"file '{b.resolve()}'\n")
+    cmd = [
+        FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
+        "-c", "copy", "-movflags", "+faststart", str(out_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
 def xfade_join(a: Path, b: Path, out_path: Path):
     dur_a = get_duration(a)
     offset = max(dur_a - TRANSITION_DURATION, 0)
@@ -162,7 +177,11 @@ def build_video(blocks: list[dict], workdir: Path, output_path: Path, audio_path
     current = block_outputs[0]
     for i in range(1, len(block_outputs)):
         joined = workdir / f"joined_{i:02d}.mp4"
-        xfade_join(current, block_outputs[i], joined)
+        transition_in = blocks[i].get("transition_in", "hard")
+        if transition_in == "strong":
+            xfade_join(current, block_outputs[i], joined)
+        else:
+            hard_join(current, block_outputs[i], joined)
         current = joined
 
     if audio_path is not None:

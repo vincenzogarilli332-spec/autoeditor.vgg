@@ -75,7 +75,7 @@ def add_clip(tmp_path: Path, original_filename: str) -> list[dict]:
         frame_paths = extract_frames(
             dest, frames_dir, count=2, start=scene_start, end=scene_end
         )
-        description = describe_clip_from_frames([str(p) for p in frame_paths])
+        analysis = describe_clip_from_frames([str(p) for p in frame_paths])
         shutil.rmtree(frames_dir, ignore_errors=True)
 
         records.append(
@@ -85,7 +85,9 @@ def add_clip(tmp_path: Path, original_filename: str) -> list[dict]:
                 "original_filename": original_filename,
                 "start": round(scene_start, 2),
                 "duration": round(scene_end - scene_start, 2),
-                "description": description,
+                "description": analysis["description"],
+                "has_text_overlay": analysis["has_text_overlay"],
+                "text_position": analysis["text_position"],
             }
         )
 

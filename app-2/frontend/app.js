@@ -111,9 +111,9 @@ async function loadClips() {
       <div class="clip-thumb"></div>
       <div class="clip-info">
         <p class="clip-desc">${escapeHtml(c.description || "Descrizione non disponibile")}</p>
-        <div class="clip-meta">${fmtTime(c.start)}–${fmtTime(c.start + c.duration)} (${c.duration}s) · ${escapeHtml(c.original_filename)}</div>
+        <div class="clip-meta">${fmtTime(c.start)}â€“${fmtTime(c.start + c.duration)} (${c.duration}s) Â· ${escapeHtml(c.original_filename)}</div>
       </div>
-      <button class="clip-delete" title="Rimuovi" data-id="${c.id}">×</button>
+      <button class="clip-delete" title="Rimuovi" data-id="${c.id}">Ã—</button>
     </div>`
     )
     .join("");
@@ -158,7 +158,7 @@ const generateResult = document.getElementById("generate-result");
 
 audioInput.addEventListener("change", () => {
   if (audioInput.files[0]) {
-    audioLabel.textContent = `🎙 ${audioInput.files[0].name}`;
+    audioLabel.textContent = `ðŸŽ™ ${audioInput.files[0].name}`;
   }
 });
 
@@ -204,7 +204,7 @@ function pollJob(jobId) {
       generateStatus.classList.add("hidden");
       generateBtn.disabled = false;
       generateResult.classList.remove("hidden");
-      generateResult.innerHTML = `<video controls src="/api/videos/${data.video_filename}"></video>`;
+      generateResult.innerHTML = `<video controls src="${videoUrl(data.video_filename)}"></video>`;
       loadVideos();
     } else if (data.status === "errore") {
       clearInterval(interval);
@@ -235,10 +235,10 @@ async function loadVideos() {
     .map(
       (v) => `
     <div class="video-card">
-      <video controls preload="none" src="/api/videos/${v.filename}"></video>
+      <video controls preload="none" src="${videoUrl(v.filename)}"></video>
       <div class="video-meta">
         <span>${v.created_at}</span>
-        <a href="/api/videos/${v.filename}" download>Scarica</a>
+        <a href="${videoUrl(v.filename)}" download>Scarica</a>
       </div>
     </div>`
     )
@@ -246,6 +246,10 @@ async function loadVideos() {
 }
 
 // ---------------- Utils ----------------
+
+function videoUrl(filename) {
+  return `/api/videos/${filename}?pw=${encodeURIComponent(APP_PASSWORD)}`;
+}
 
 function fmtTime(seconds) {
   const s = Math.max(0, Math.round(seconds));

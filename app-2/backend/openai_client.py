@@ -82,27 +82,50 @@ def describe_clip_from_frames(frame_paths: list[str]) -> str:
     return data["choices"][0]["message"]["content"].strip()
 
 
-def choose_clips_for_blocks(blocks: list[str], clip_library: list[dict]) -> list[dict]:
+def choose_clips_for_blocks(blocks: list[str], clip_library: list[dict], block_targets: list[float]) -> list[dict]:
     """Dato un elenco di blocchi di testo (ognuno una fase narrativa: problema,
-    smentita soluzioni, reveal, benefici...) e la libreria di clip disponibili
-    (ognuna con id + descrizione), chiede al modello di scegliere, per ogni
-    blocco, quali clip usare e con quali parametri di montaggio (durata,
-    zoom), seguendo le regole della tecnica di editing.
+    smentita soluzioni, reveal, benefici...), la libreria di clip disponibili
+    (ognuna con id + descrizione) e una durata-obiettivo per ogni blocco
+    (calcolata dalla durata reale dell'audio, proporzionalmente al testo),
+    chiede al modello di scegliere, per ogni blocco, quali clip usare, con
+    quale durata e quale tipo di transizione in entrata, seguendo le regole
+    della tecnica di editing.
 
-    Ritorna una lista allineata a 'blocks': per ogni blocco, una lista di
-    segmenti { clip_id, duration, zoom }.
+    Ritorna una lista allineata a 'blocks': per ogni blocco, un dizionario
+    { transition_in: "hard"|"strong", segments: [ {clip_id, duration, zoom}, ... ] }.
     """
 
     rules = (
         "REGOLE DI MONTAGGIO DA SEGUIRE:\n"
-        "- Durata clip per taglio-ritmico (stessa scena/energia): 0.7-1.0s\n"
-        "- Durata clip per taglio-scena (cambio di contesto): 1.5-2.5s (default 2s)\n"
-        "- Media generale desiderata: circa 1.3-1.4s per clip\n"
-        "- Zoom leggero (Ken Burns) su circa 1 clip ogni 2-3\n"
-        "- Ogni blocco narrativo puo' contenere 2-4 clip in sequenza (taglio secco tra loro)\n"
-        "- Scegli le clip la cui descrizione corrisponde meglio al contenuto del blocco "
-        "(es. blocco 'problema' -> clip che mostrano il problema/situazione, non il prodotto in azione)\n"
-        "- Evita di ripetere sempre la stessa clip se ci sono alternative valide\n"
+        "- Ogni blocco ha una DURATA-OBIETTIVO indicata: la somma delle durate dei suoi "
+        "segmenti deve avvicinarsi a quel numero (tolleranza +/- 15%), ma tu decidi come "
+        "distribuirla: non tutte le clip devono durare uguale.\n"
+        "- Varia le durate in modo intenzionale, seguendo il senso del testo in quel punto:\n"
+        "  - Se la clip mostra un'azione lenta, un dettaglio, o accompagna un momento "
+        "importante del testo, falla durare di piu' (fino a 2.5-3s).\n"
+        "  - Se una scena e' lenta o ripetitiva (es. una persona che parla o si muove "
+        "senza cambiare granche'), spezzala con un micro-taglio ritmico (0.7-1.0s) invece "
+        "di lasciarla ferma a lungo: usa la stessa clip due volte con offset diversi se serve.\n"
+        "  - Nei momenti di build-up o urgenza (es. prima di un reveal, una call to action) "
+        "puoi accelerare il ritmo con piu' tagli brevi.\n"
+        "  - Nei momenti calmi o esplicativi puoi rallentare con clip singole piu' lunghe.\n"
+        "- Zoom leggero (Ken Burns) su circa 1 clip ogni 2-3, non di piu'.\n"
+        "- Ogni blocco puo' contenere da 1 a 4 clip in sequenza (taglio secco tra loro dentro "
+        "lo stesso blocco).\n"
+        "- Scegli le clip la cui descrizione corrisponde meglio al contenuto del blocco.\n"
+        "- Evita di ripetere sempre la stessa clip se ci sono alternative valide.\n\n"
+        "REGOLE PER LA TRANSIZIONE TRA UN BLOCCO E IL PRECEDENTE (campo transition_in):\n"
+        "- 'hard' (taglio secco, DEFAULT): usalo quando il blocco continua lo stesso filo "
+        "narrativo del precedente, anche se cambia argomento in modo naturale.\n"
+        "- 'strong' (transizione con avvicinamento): usalo SOLO in corrispondenza di una vera "
+        "svolta narrativa importante (es. il momento del reveal del prodotto, un cambio netto "
+        "di tono). Usalo con parsimonia: in un video di 5-7 blocchi, va bene al massimo 1-2 "
+        "transizioni 'strong' in tutto, altrimenti il video risulta caotico invece che fluido.\n"
+        "- Il primo blocco non ha transizione in entrata, ignora questo campo per il blocco 0.\n"
+    )
+
+    targets_text = "\n".join(
+        f"BLOCCO {i}: durata-obiettivo {t:.1f}s" for i, t in enumerate(block_targets)
     )
 
     library_text = "\n".join(
@@ -111,15 +134,16 @@ def choose_clips_for_blocks(blocks: list[str], clip_library: list[dict]) -> list
     blocks_text = "\n".join(f"BLOCCO {i}: \"{b}\"" for i, b in enumerate(blocks))
 
     prompt = (
-        f"{rules}\n\nLIBRERIA CLIP DISPONIBILI:\n{library_text}\n\n"
+        f"{rules}\n\nDURATE OBIETTIVO PER BLOCCO:\n{targets_text}\n\n"
+        f"LIBRERIA CLIP DISPONIBILI:\n{library_text}\n\n"
         f"TESTO DIVISO IN BLOCCHI NARRATIVI:\n{blocks_text}\n\n"
-        "Per ogni blocco, scegli la sequenza di clip da usare. Rispondi SOLO con "
-        "un JSON valido (nessun testo prima o dopo, nessun blocco markdown), con "
-        "questa forma esatta:\n"
-        '{"blocks": [ {"segments": [ {"clip_id": "...", "duration": 1.8, '
-        '"zoom": false}, ... ] }, ... ] }\n'
-        "L'array 'blocks' deve avere esattamente la stessa lunghezza e lo stesso "
-        "ordine dei BLOCCO elencati sopra."
+        "Per ogni blocco, scegli la sequenza di clip da usare e il tipo di transizione in "
+        "entrata. Rispondi SOLO con un JSON valido (nessun testo prima o dopo, nessun blocco "
+        "markdown), con questa forma esatta:\n"
+        '{"blocks": [ {"transition_in": "hard", "segments": [ {"clip_id": "...", '
+        '"duration": 1.8, "zoom": false}, ... ] }, ... ] }\n'
+        "L'array 'blocks' deve avere esattamente la stessa lunghezza e lo stesso ordine dei "
+        "BLOCCO elencati sopra."
     )
 
     payload = {

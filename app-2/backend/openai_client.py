@@ -40,10 +40,12 @@ def _headers() -> dict:
     }
 
 
-def describe_clip_from_frames(frame_paths: list[str]) -> str:
+def describe_clip_from_frames(frame_paths: list[str]) -> dict:
     """Manda 2-3 fotogrammi di una scena a GPT-4.1 mini e chiede una
-    descrizione breve, pensata per essere poi usata come 'tag' di ricerca
-    quando si sceglie quale clip usare per un blocco di testo del video."""
+    descrizione breve, PIU' se sono presenti scritte/didascalie gia'
+    'bruciate' nel video (es. sottotitoli di CapCut) e dove si trovano
+    approssimativamente. Serve a decidere che stile di testo sovrimpresso
+    usare quando quella clip verra' scelta per un video."""
 
     content = [
         {
@@ -51,10 +53,16 @@ def describe_clip_from_frames(frame_paths: list[str]) -> str:
             "text": (
                 "Guarda questi fotogrammi presi da una clip video verticale "
                 "usata per contenuti di marketing (stile social/Reels/TikTok). "
-                "Scrivi una descrizione breve (1-2 frasi, max 30 parole) che "
-                "catturi: soggetto, azione/gesto, ambientazione, ed eventuale "
-                "prodotto visibile. Rispondi SOLO con la descrizione, senza "
-                "preamboli."
+                "Rispondi SOLO con un JSON valido (nessun testo prima o dopo), "
+                "con questa forma esatta:\n"
+                '{"description": "descrizione breve (1-2 frasi, max 30 parole): '
+                'soggetto, azione/gesto, ambientazione, prodotto visibile", '
+                '"has_text_overlay": true/false (se nei fotogrammi sono gia\' '
+                'visibili scritte/didascalie/sottotitoli sovrimpressi nel video, '
+                'non conta il logo di un\'app), '
+                '"text_position": "top"/"middle"/"bottom"/"none" (dove si trova '
+                'approssimativamente il testo gia\' presente, "none" se has_text_overlay '
+                'e\' false)}'
             ),
         }
     ]
@@ -70,7 +78,8 @@ def describe_clip_from_frames(frame_paths: list[str]) -> str:
 
     payload = {
         "model": MODEL,
-        "max_tokens": 200,
+        "max_tokens": 250,
+        "response_format": {"type": "json_object"},
         "messages": [{"role": "user", "content": content}],
     }
 
@@ -79,7 +88,13 @@ def describe_clip_from_frames(frame_paths: list[str]) -> str:
         r.raise_for_status()
         data = r.json()
 
-    return data["choices"][0]["message"]["content"].strip()
+    raw = data["choices"][0]["message"]["content"].strip()
+    parsed = json.loads(raw)
+    return {
+        "description": parsed.get("description", "").strip(),
+        "has_text_overlay": bool(parsed.get("has_text_overlay", False)),
+        "text_position": parsed.get("text_position", "none"),
+    }
 
 
 def choose_clips_for_blocks(blocks: list[str], clip_library: list[dict], block_targets: list[float]) -> list[dict]:

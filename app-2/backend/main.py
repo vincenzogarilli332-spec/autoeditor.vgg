@@ -66,6 +66,15 @@ async def upload_clip(file: UploadFile = File(...), _: None = Depends(require_pa
     return record
 
 
+@app.get("/api/clips/backup")
+def backup_clips(_: None = Depends(require_password)):
+    """Scarica un file JSON con tutte le descrizioni delle clip analizzate
+    finora — una rete di sicurezza per non dover ripagare l'analisi se la
+    Galleria dovesse svuotarsi (es. Volume non collegato su Railway).
+    Nota: salva solo le descrizioni, non i file video veri e propri."""
+    return clips_module.list_clips()
+
+
 @app.delete("/api/clips/{clip_id}")
 def remove_clip(clip_id: str, _: None = Depends(require_password)):
     clips_module.delete_clip(clip_id)

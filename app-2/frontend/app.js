@@ -126,6 +126,18 @@ async function loadClips() {
   });
 }
 
+document.getElementById("backup-btn").addEventListener("click", async () => {
+  const res = await apiFetch("/api/clips/backup");
+  const data = await res.json();
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `backup-clip-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
 fileInput.addEventListener("change", async () => {
   const files = Array.from(fileInput.files);
   for (const file of files) {

@@ -21,9 +21,9 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import clips as clips_module
@@ -108,11 +108,41 @@ def get_videos(_: None = Depends(require_password)):
 
 
 @app.get("/api/videos/{filename}")
-def get_video_file(filename: str, _: None = Depends(require_password)):
+def get_video_file(filename: str, request: Request, _: None = Depends(require_password)):
     path = generate_module.VIDEOS_DIR / filename
     if not path.exists():
         raise HTTPException(status_code=404, detail="Video non trovato")
-    return FileResponse(path, media_type="video/mp4")
+
+    file_size = path.stat().st_size
+    range_header = request.headers.get("range")
+
+    if range_header is None:
+        return FileResponse(path, media_type="video/mp4")
+
+    # Esempio di header: "bytes=1000-"
+    range_value = range_header.replace("bytes=", "").split("-")
+    start = int(range_value[0]) if range_value[0] else 0
+    end = int(range_value[1]) if len(range_value) > 1 and range_value[1] else file_size - 1
+    end = min(end, file_size - 1)
+    chunk_size = end - start + 1
+
+    def iterfile():
+        with open(path, "rb") as f:
+            f.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                data = f.read(min(1024 * 1024, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    headers = {
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(chunk_size),
+    }
+    return StreamingResponse(iterfile(), status_code=206, media_type="video/mp4", headers=headers)
 
 
 # ---------- Frontend statico ----------

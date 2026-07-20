@@ -25,7 +25,7 @@ from pathlib import Path
 
 from openai_client import choose_clips_for_blocks
 from clips import CLIPS_DIR, list_clips
-from editor import build_video
+from editor import build_video, get_duration
 
 STORAGE = Path(__file__).parent / "storage"
 VIDEOS_DIR = STORAGE / "videos"
@@ -33,10 +33,29 @@ JOBS_DIR = STORAGE / "jobs"
 VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
+WORDS_PER_SECOND = 2.3  # ritmo di lettura tipico per un voice-over pubblicitario
+
 
 def split_into_blocks(script_text: str) -> list[str]:
     raw_blocks = [b.strip() for b in script_text.replace("---", "\n\n").split("\n\n")]
     return [b for b in raw_blocks if b]
+
+
+def estimate_block_targets(blocks_text: list[str], audio_path: Path | None) -> list[float]:
+    """Calcola una durata-obiettivo (in secondi) per ogni blocco, in modo
+    proporzionale alla sua lunghezza in parole. Se e' presente l'audio del
+    voice-over, i target sommano alla sua durata reale (cosi' il video finale
+    non risulta piu' corto dell'audio); altrimenti si stima dal ritmo di
+    lettura tipico di un voice-over pubblicitario."""
+    word_counts = [max(len(b.split()), 1) for b in blocks_text]
+    total_words = sum(word_counts)
+
+    if audio_path is not None:
+        total_duration = get_duration(audio_path)
+    else:
+        total_duration = total_words / WORDS_PER_SECOND
+
+    return [total_duration * (wc / total_words) for wc in word_counts]
 
 
 def _job_file(job_id: str) -> Path:
@@ -75,8 +94,11 @@ def run_generation_job(job_id: str, script_text: str, audio_path: Path | None):
                 "La Galleria e' vuota: carica almeno qualche clip prima di generare un video."
             )
 
-        _set_job_status(job_id, "elaborazione", "Claude sta scegliendo le clip migliori per ogni blocco...")
-        chosen_blocks = choose_clips_for_blocks(blocks_text, clip_library)
+        _set_job_status(job_id, "elaborazione", "Calcolo il ritmo dai blocchi di testo...")
+        block_targets = estimate_block_targets(blocks_text, audio_path)
+
+        _set_job_status(job_id, "elaborazione", "L'IA sta scegliendo le clip e il ritmo del montaggio...")
+        chosen_blocks = choose_clips_for_blocks(blocks_text, clip_library, block_targets)
 
         clip_by_id = {c["id"]: c for c in clip_library}
 
@@ -99,10 +121,31 @@ def run_generation_job(job_id: str, script_text: str, audio_path: Path | None):
                     }
                 )
             if segments:
-                plan_blocks.append({"segments": segments})
+                plan_blocks.append(
+                    {
+                        "segments": segments,
+                        "transition_in": chosen.get("transition_in", "hard"),
+                    }
+                )
 
         if not plan_blocks:
             raise ValueError("Nessuna clip valida selezionata per il montaggio.")
+
+        # Se l'audio e' piu' lungo di quanto pianificato (per via degli arrotondamenti
+        # o della liberta' creativa lasciata all'IA), allunghiamo l'ultimo segmento
+        # per evitare che l'audio venga tagliato bruscamente alla fine.
+        if audio_path is not None:
+            audio_duration = get_duration(audio_path)
+            num_strong = sum(
+                1 for b in plan_blocks[1:] if b["transition_in"] == "strong"
+            )
+            planned_duration = (
+                sum(seg["duration"] for b in plan_blocks for seg in b["segments"])
+                - num_strong * 0.4
+            )
+            shortfall = audio_duration - planned_duration
+            if shortfall > 0.15:
+                plan_blocks[-1]["segments"][-1]["duration"] += min(shortfall, 3.0)
 
         _set_job_status(job_id, "elaborazione", "Monto il video con ffmpeg...")
         workdir = STORAGE / "work" / job_id

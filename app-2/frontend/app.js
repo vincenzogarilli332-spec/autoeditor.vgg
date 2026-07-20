@@ -111,9 +111,9 @@ async function loadClips() {
       <div class="clip-thumb"></div>
       <div class="clip-info">
         <p class="clip-desc">${escapeHtml(c.description || "Descrizione non disponibile")}</p>
-        <div class="clip-meta">${fmtTime(c.start)}â€“${fmtTime(c.start + c.duration)} (${c.duration}s) Â· ${escapeHtml(c.original_filename)}</div>
+        <div class="clip-meta">${fmtTime(c.start)}–${fmtTime(c.start + c.duration)} (${c.duration}s) · ${escapeHtml(c.original_filename)}</div>
       </div>
-      <button class="clip-delete" title="Rimuovi" data-id="${c.id}">Ã—</button>
+      <button class="clip-delete" title="Rimuovi" data-id="${c.id}">×</button>
     </div>`
     )
     .join("");
@@ -170,7 +170,7 @@ const generateResult = document.getElementById("generate-result");
 
 audioInput.addEventListener("change", () => {
   if (audioInput.files[0]) {
-    audioLabel.textContent = `ðŸŽ™ ${audioInput.files[0].name}`;
+    audioLabel.textContent = `🎙 ${audioInput.files[0].name}`;
   }
 });
 

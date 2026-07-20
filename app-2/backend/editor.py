@@ -1,4 +1,4 @@
-""
+"""
 editor.py
 
 Logica di montaggio video (ffmpeg), adattata dal prototipo monta_video.py
@@ -14,12 +14,22 @@ import subprocess
 from pathlib import Path
 
 FFMPEG = "ffmpeg"
-FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+FONT_COVER = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+FONT_WORD = str(Path(__file__).parent / "fonts" / "Anton-Regular.ttf")
 
 RESOLUTION = (1080, 1920)
 FPS = 30
 TRANSITION_DURATION = 0.4
 TRANSITION_TYPE = "zoomin"
+
+# Zone approssimative dove posizionare il banner di copertura, in base a
+# dove l'analisi ha rilevato il testo originale della clip
+COVER_ZONES = {
+    "top": 0.10,
+    "middle": 0.44,
+    "bottom": 0.74,
+    "none": 0.44,
+}
 
 
 def wrap_text(t: str, max_chars: int = 26) -> str:
@@ -47,13 +57,22 @@ def esc_text(t: str) -> str:
     )
 
 
+def esc_word(t: str) -> str:
+    return (
+        t.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("'", "\u2019")
+        .replace("%", "\\%")
+    )
+
+
 def build_segment(seg: dict, idx: int, workdir: Path) -> Path:
     w, h = RESOLUTION
     src = seg["source"]
     start = seg.get("start", 0)
     dur = seg["duration"]
     zoom = seg.get("zoom", False)
-    text = seg.get("text", "")
+    text_mode = seg.get("text_mode", "cover")
 
     out = workdir / f"seg_{idx:03d}.mp4"
 
@@ -66,13 +85,28 @@ def build_segment(seg: dict, idx: int, workdir: Path) -> Path:
             f"s={w}x{h}:fps={FPS}"
         )
 
-    if text:
+    if text_mode == "cover" and seg.get("text"):
+        # La clip ha gia' scritte proprie: copriamo con un banner bianco pieno
+        # e mostriamo la nostra frase in nero sopra, nella stessa zona.
+        zone = COVER_ZONES.get(seg.get("text_position", "middle"), 0.44)
+        band_y = int(h * zone)
+        band_h = 260
+        filters.append(f"drawbox=x=0:y={band_y}:w={w}:h={band_h}:color=white@1.0:t=fill")
         filters.append(
-            f"drawtext=text='{esc_text(text)}':fontfile={FONT}:"
-            "fontsize=48:fontcolor=white:line_spacing=8:"
-            "box=1:boxcolor=black@0.55:boxborderw=18:"
-            "x=(w-text_w)/2:y=(h/2)+90"
+            f"drawtext=text='{esc_text(seg['text'])}':fontfile={FONT_COVER}:"
+            "fontsize=44:fontcolor=black:line_spacing=6:"
+            f"x=(w-text_w)/2:y={band_y}+({band_h}-text_h)/2"
         )
+    elif text_mode == "words" and seg.get("word_timings"):
+        # La clip e' pulita: mostriamo una parola alla volta, veloce, in stile
+        # bold con contorno, sincronizzata al tempo relativo dentro il segmento.
+        for word, rel_start, rel_end in seg["word_timings"]:
+            filters.append(
+                f"drawtext=text='{esc_word(word.upper())}':fontfile={FONT_WORD}:"
+                "fontsize=88:fontcolor=white:borderw=6:bordercolor=black:"
+                "x=(w-text_w)/2:y=(h*0.42)-(text_h/2):"
+                f"enable='between(t,{rel_start:.3f},{rel_end:.3f})'"
+            )
 
     vf = ",".join(filters)
 

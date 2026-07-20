@@ -58,6 +58,24 @@ def estimate_block_targets(blocks_text: list[str], audio_path: Path | None) -> l
     return [total_duration * (wc / total_words) for wc in word_counts]
 
 
+def compute_word_timings(text: str, total_duration: float) -> list[tuple[str, float, float]]:
+    """Divide un testo in parole e assegna a ciascuna una finestra di tempo
+    (in secondi, relativa all'inizio del blocco), proporzionale alla
+    lunghezza della parola, cosi' la lettura sembra naturale."""
+    words = text.split()
+    if not words:
+        return []
+    weights = [max(len(w), 2) for w in words]
+    total_weight = sum(weights)
+    timings = []
+    t = 0.0
+    for word, weight in zip(words, weights):
+        dur = total_duration * (weight / total_weight)
+        timings.append((word, t, t + dur))
+        t += dur
+    return timings
+
+
 def _job_file(job_id: str) -> Path:
     return JOBS_DIR / f"{job_id}.json"
 
@@ -104,29 +122,76 @@ def run_generation_job(job_id: str, script_text: str, audio_path: Path | None):
 
         plan_blocks = []
         for block_text, chosen in zip(blocks_text, chosen_blocks):
-            segments = []
+            raw_segments = []
             for seg in chosen["segments"]:
                 clip = clip_by_id.get(seg["clip_id"])
                 if clip is None:
                     continue
                 clip_path = CLIPS_DIR / clip["filename"]
                 duration = min(seg.get("duration", 1.4), clip["duration"])
-                segments.append(
+                raw_segments.append(
                     {
                         "source": str(clip_path),
                         "start": clip.get("start", 0),
                         "duration": duration,
                         "zoom": seg.get("zoom", False),
-                        "text": block_text,
+                        "clip": clip,
                     }
                 )
-            if segments:
-                plan_blocks.append(
-                    {
-                        "segments": segments,
-                        "transition_in": chosen.get("transition_in", "hard"),
-                    }
-                )
+            if not raw_segments:
+                continue
+
+            # Se almeno una delle clip scelte per questo blocco ha gia' scritte
+            # proprie, usiamo lo stile 'copertura' per l'intero blocco (piu'
+            # semplice e coerente che mescolare due stili nello stesso blocco).
+            overlay_clip = next(
+                (s["clip"] for s in raw_segments if s["clip"].get("has_text_overlay")), None
+            )
+
+            segments = []
+            if overlay_clip is not None:
+                for s in raw_segments:
+                    segments.append(
+                        {
+                            "source": s["source"],
+                            "start": s["start"],
+                            "duration": s["duration"],
+                            "zoom": s["zoom"],
+                            "text_mode": "cover",
+                            "text": block_text,
+                            "text_position": overlay_clip.get("text_position", "middle"),
+                        }
+                    )
+            else:
+                block_duration = sum(s["duration"] for s in raw_segments)
+                word_timings = compute_word_timings(block_text, block_duration)
+                offset = 0.0
+                for s in raw_segments:
+                    seg_start, seg_end = offset, offset + s["duration"]
+                    local_words = []
+                    for word, wstart, wend in word_timings:
+                        rel_start = max(wstart, seg_start) - offset
+                        rel_end = min(wend, seg_end) - offset
+                        if rel_end - rel_start > 0.05:
+                            local_words.append((word, round(rel_start, 3), round(rel_end, 3)))
+                    segments.append(
+                        {
+                            "source": s["source"],
+                            "start": s["start"],
+                            "duration": s["duration"],
+                            "zoom": s["zoom"],
+                            "text_mode": "words",
+                            "word_timings": local_words,
+                        }
+                    )
+                    offset = seg_end
+
+            plan_blocks.append(
+                {
+                    "segments": segments,
+                    "transition_in": chosen.get("transition_in", "hard"),
+                }
+            )
 
         if not plan_blocks:
             raise ValueError("Nessuna clip valida selezionata per il montaggio.")

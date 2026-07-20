@@ -10,14 +10,13 @@ salva nel browser, mandandola poi in ogni richiesta come header
 
 import os
 
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Query
 
 
-def require_password(x_app_password: str = Header(default="")):
+def require_password(x_app_password: str = Header(default=""), pw: str = Query(default="")):
     expected = os.environ.get("APP_PASSWORD")
     if not expected:
-        # Se non e' stata impostata nessuna password, l'app resta aperta
-        # (utile in locale durante lo sviluppo) ma segnaliamolo in log.
         return
-    if x_app_password != expected:
-        raise HTTPException(status_code=401, detail="Password non valida")
+    if x_app_password == expected or pw == expected:
+        return
+    raise HTTPException(status_code=401, detail="Password non valida")

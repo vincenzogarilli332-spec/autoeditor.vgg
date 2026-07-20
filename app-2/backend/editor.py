@@ -96,7 +96,7 @@ def concat_hardcuts(paths: list[Path], out_path: Path):
             f.write(f"file '{p.resolve()}'\n")
     cmd = [
         FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
-        "-c", "copy", str(out_path),
+        "-c", "copy", "-movflags", "+faststart", str(out_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
 
@@ -123,6 +123,7 @@ def xfade_join(a: Path, b: Path, out_path: Path):
         "-filter_complex", filter_complex,
         "-map", "[v]",
         "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
         str(out_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True)
@@ -136,6 +137,7 @@ def mux_audio(video_path: Path, audio_path: Path, out_path: Path):
         "-i", str(video_path), "-i", str(audio_path),
         "-map", "0:v", "-map", "1:a",
         "-c:v", "copy", "-c:a", "aac",
+        "-movflags", "+faststart",
         "-shortest",
         str(out_path),
     ]

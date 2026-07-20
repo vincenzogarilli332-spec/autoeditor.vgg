@@ -229,6 +229,19 @@ html, body {
   min-height: 16px;
 }
 
+.btn-link {
+  display: block;
+  margin: 14px auto 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 6px;
+}
+.btn-link:hover { color: var(--accent); }
+
 .clips-grid {
   margin-top: 20px;
   display: grid;
